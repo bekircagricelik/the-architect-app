@@ -1,23 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageCircle, TrendingUp, Target, Zap, ChevronRight, Calendar, Sparkles, BookOpen, X, Plus, Mic, MicOff, ArrowRight, Check, User, Settings, Trash2, RefreshCw } from 'lucide-react';
 
-// Simple localStorage-based storage
-window.storage = {
-  get: async (key) => {
-    const value = localStorage.getItem(key);
-    if (!value) throw new Error('Key not found');
-    return { key, value };
-  },
-  set: async (key, value) => {
-    localStorage.setItem(key, value);
-    return { key, value };
-  },
-  delete: async (key) => {
-    localStorage.removeItem(key);
-    return { key, deleted: true };
-  }
-};
-
 export default function ArchitectApp() {
   const [currentView, setCurrentView] = useState('loading');
   const [entries, setEntries] = useState([]);
@@ -50,6 +33,10 @@ export default function ArchitectApp() {
   const [editedName, setEditedName] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isOnboardingRecording, setIsOnboardingRecording] = useState(false);
+  const [onboardingRecordingStatus, setOnboardingRecordingStatus] = useState('');
+  const [onboardingVoiceTranscript, setOnboardingVoiceTranscript] = useState('');
+  const onboardingRecognitionRef = useRef(null);
 
   const categories = [
     { id: 'mindset', label: 'Mindset', icon: Sparkles },
@@ -103,9 +90,10 @@ export default function ArchitectApp() {
     }
   ];
 
-useEffect(() => {
+  useEffect(() => {
     loadData();
     initializeSpeechRecognition();
+    initializeOnboardingSpeechRecognition();
   }, []);
 
   const initializeSpeechRecognition = () => {
@@ -117,7 +105,7 @@ useEffect(() => {
       }
 
       recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
+      recognitionRef.current.continuous = true;
       recognitionRef.current.interimResults = true;
       recognitionRef.current.lang = 'en-US';
       recognitionRef.current.maxAlternatives = 1;
@@ -215,6 +203,7 @@ useEffect(() => {
       setIsRecording(false);
       setRecordingStatus('');
       
+      // Distill voice entry through AI
       if (voiceTranscript.trim()) {
         distillVoiceEntry(voiceTranscript);
       }
@@ -304,6 +293,7 @@ Return ONLY the distilled text, nothing else. No preamble, no "Here's the distil
       }
       if (profileData) {
         const profile = JSON.parse(profileData.value);
+        // Recalculate streak on load to ensure accuracy
         const loadedEntries = entriesData ? JSON.parse(entriesData.value) : [];
         profile.currentStreak = calculateStreak(loadedEntries);
         setUserProfile(profile);
@@ -323,50 +313,6 @@ Return ONLY the distilled text, nothing else. No preamble, no "Here's the distil
     } catch (error) {
       console.error('Save failed:', error);
     }
-  };
-
-const calculateStreak = (entries) => {
-    if (entries.length === 0) return 0;
-    
-    const uniqueDates = [...new Set(entries.map(e => e.date))].sort((a, b) => {
-      return new Date(b) - new Date(a);
-    });
-    
-    if (uniqueDates.length === 0) return 0;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const mostRecentEntry = new Date(uniqueDates[0]);
-    mostRecentEntry.setHours(0, 0, 0, 0);
-    
-    if (mostRecentEntry.getTime() !== today.getTime() && 
-        mostRecentEntry.getTime() !== yesterday.getTime()) {
-      return 0;
-    }
-    
-    let streak = 1;
-    let currentDate = new Date(mostRecentEntry);
-    
-    for (let i = 1; i < uniqueDates.length; i++) {
-      const prevDate = new Date(uniqueDates[i]);
-      prevDate.setHours(0, 0, 0, 0);
-      
-      const expectedDate = new Date(currentDate);
-      expectedDate.setDate(expectedDate.getDate() - 1);
-      
-      if (prevDate.getTime() === expectedDate.getTime()) {
-        streak++;
-        currentDate = prevDate;
-      } else {
-        break;
-      }
-    }
-    
-    return streak;
   };
 
   const getArchitectResponse = async (entryText, category, pastEntries, profileData) => {
@@ -436,6 +382,53 @@ Keep response under 150 words. Write like you're texting a friend you deeply car
     }
   };
 
+  const calculateStreak = (entries) => {
+    if (entries.length === 0) return 0;
+    
+    // Get unique dates and sort them newest to oldest
+    const uniqueDates = [...new Set(entries.map(e => e.date))].sort((a, b) => {
+      return new Date(b) - new Date(a);
+    });
+    
+    if (uniqueDates.length === 0) return 0;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const mostRecentEntry = new Date(uniqueDates[0]);
+    mostRecentEntry.setHours(0, 0, 0, 0);
+    
+    // If most recent entry is not today or yesterday, streak is broken
+    if (mostRecentEntry.getTime() !== today.getTime() && 
+        mostRecentEntry.getTime() !== yesterday.getTime()) {
+      return 0;
+    }
+    
+    // Count consecutive days
+    let streak = 1;
+    let currentDate = new Date(mostRecentEntry);
+    
+    for (let i = 1; i < uniqueDates.length; i++) {
+      const prevDate = new Date(uniqueDates[i]);
+      prevDate.setHours(0, 0, 0, 0);
+      
+      const expectedDate = new Date(currentDate);
+      expectedDate.setDate(expectedDate.getDate() - 1);
+      
+      if (prevDate.getTime() === expectedDate.getTime()) {
+        streak++;
+        currentDate = prevDate;
+      } else {
+        break;
+      }
+    }
+    
+    return streak;
+  };
+
   const handleSubmitEntry = async () => {
     if (!currentEntry.trim()) return;
 
@@ -453,6 +446,8 @@ Keep response under 150 words. Write like you're texting a friend you deeply car
     const response = await getArchitectResponse(currentEntry, selectedCategory, entries, userProfile);
 
     const updatedEntries = [newEntry, ...entries];
+    
+    // Calculate streak properly
     const newStreak = calculateStreak(updatedEntries);
 
     const updatedProfile = {
@@ -574,6 +569,128 @@ Remember: The goal is self-discovery, not advice-giving.`;
     }
   };
 
+  const initializeOnboardingSpeechRecognition = () => {
+    try {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      
+      if (!SpeechRecognition) {
+        return;
+      }
+
+      onboardingRecognitionRef.current = new SpeechRecognition();
+      onboardingRecognitionRef.current.continuous = true;
+      onboardingRecognitionRef.current.interimResults = true;
+      onboardingRecognitionRef.current.lang = 'en-US';
+      onboardingRecognitionRef.current.maxAlternatives = 1;
+
+      onboardingRecognitionRef.current.onstart = () => {
+        setOnboardingRecordingStatus('🎤 Listening... Speak your answer');
+      };
+
+      onboardingRecognitionRef.current.onresult = (event) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' ';
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        if (finalTranscript) {
+          setOnboardingVoiceTranscript(prev => prev + finalTranscript);
+          setOnboardingRecordingStatus('✓ Got it! Keep talking or stop.');
+        } else if (interimTranscript) {
+          setOnboardingRecordingStatus('🎤 ' + interimTranscript);
+        }
+      };
+
+      onboardingRecognitionRef.current.onerror = (event) => {
+        let errorMessage = 'Error: ';
+        switch(event.error) {
+          case 'not-allowed':
+            errorMessage = '⚠️ Microphone access denied.';
+            break;
+          case 'no-speech':
+            errorMessage = '⚠️ No speech detected.';
+            break;
+          case 'audio-capture':
+            errorMessage = '⚠️ No microphone found.';
+            break;
+          case 'network':
+            errorMessage = '⚠️ Network error.';
+            break;
+          default:
+            errorMessage = '⚠️ ' + event.error;
+        }
+        
+        setOnboardingRecordingStatus(errorMessage);
+        setTimeout(() => {
+          setIsOnboardingRecording(false);
+          setOnboardingRecordingStatus('');
+        }, 3000);
+      };
+
+      onboardingRecognitionRef.current.onend = () => {
+        if (isOnboardingRecording) {
+          try {
+            onboardingRecognitionRef.current.start();
+          } catch (e) {
+            console.error('Failed to restart onboarding recognition:', e);
+            setIsOnboardingRecording(false);
+            setOnboardingRecordingStatus('');
+          }
+        } else {
+          setIsOnboardingRecording(false);
+          setOnboardingRecordingStatus('');
+        }
+      };
+    } catch (error) {
+      console.error('Failed to initialize onboarding speech recognition:', error);
+    }
+  };
+
+  const toggleOnboardingRecording = () => {
+    if (!onboardingRecognitionRef.current) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert('Voice input is not supported in your browser.');
+        return;
+      }
+      initializeOnboardingSpeechRecognition();
+      setTimeout(() => toggleOnboardingRecording(), 100);
+      return;
+    }
+
+    if (isOnboardingRecording) {
+      try {
+        onboardingRecognitionRef.current.stop();
+      } catch (e) {
+        console.error('Error stopping recognition:', e);
+      }
+      setIsOnboardingRecording(false);
+      setOnboardingRecordingStatus('');
+      
+      if (onboardingVoiceTranscript.trim()) {
+        setCurrentAnswer(onboardingVoiceTranscript);
+        setOnboardingVoiceTranscript('');
+      }
+    } else {
+      setIsOnboardingRecording(true);
+      setOnboardingVoiceTranscript('');
+      setOnboardingRecordingStatus('Starting...');
+      try {
+        onboardingRecognitionRef.current.start();
+      } catch (e) {
+        setOnboardingRecordingStatus('⚠️ Failed to start.');
+        setIsOnboardingRecording(false);
+      }
+    }
+  };
+
   const completeOnboarding = async (answers) => {
     const updatedProfile = {
       ...userProfile,
@@ -665,7 +782,6 @@ Remember: The goal is self-discovery, not advice-giving.`;
     }
   };
 
-// ONBOARDING VIEW
   if (currentView === 'onboarding') {
     const question = onboardingQuestions[onboardingStep];
     const progress = ((onboardingStep + 1) / onboardingQuestions.length) * 100;
@@ -696,6 +812,39 @@ Remember: The goal is self-discovery, not advice-giving.`;
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 mb-6">
             <h2 className="text-2xl font-semibold text-white mb-3">{question.question}</h2>
             <p className="text-slate-400 text-sm mb-6">{question.context}</p>
+            
+            <div className="mb-3 flex items-center justify-between">
+              <label className="text-slate-400 text-sm">Your answer</label>
+              <button
+                onClick={toggleOnboardingRecording}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                  isOnboardingRecording
+                    ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
+                    : 'bg-cyan-500 hover:bg-cyan-600 text-white'
+                }`}
+              >
+                {isOnboardingRecording ? (
+                  <>
+                    <MicOff className="w-4 h-4" />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-4 h-4" />
+                    Voice
+                  </>
+                )}
+              </button>
+            </div>
+
+            {onboardingRecordingStatus && (
+              <div className="mb-3 text-center">
+                <div className="inline-flex items-center gap-2 bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg">
+                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-sm">{onboardingRecordingStatus}</span>
+                </div>
+              </div>
+            )}
             
             <textarea
               value={currentAnswer}
@@ -730,33 +879,20 @@ Remember: The goal is self-discovery, not advice-giving.`;
     );
   }
 
-  // HOME VIEW
   if (currentView === 'home') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4">
         <div className="max-w-4xl mx-auto">
-          <div className="pt-12 pb-8">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex-1" />
-              <div className="flex items-center justify-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center">
-                  <Sparkles className="w-7 h-7" />
-                </div>
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                  The Architect
-                </h1>
+          <div className="text-center pt-12 pb-8">
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-lg flex items-center justify-center">
+                <Sparkles className="w-7 h-7" />
               </div>
-              <div className="flex-1 flex justify-end">
-                <button
-                  onClick={() => setCurrentView('profile')}
-                  className="p-3 bg-slate-800/50 hover:bg-slate-700 border border-slate-700 hover:border-cyan-500 rounded-xl transition-all"
-                  title="Profile Settings"
-                >
-                  <Settings className="w-6 h-6 text-slate-400 hover:text-cyan-400" />
-                </button>
-              </div>
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
+                The Architect
+              </h1>
             </div>
-            <p className="text-slate-400 text-lg text-center">Your High Agency Mentor</p>
+            <p className="text-slate-400 text-lg">Your High Agency Mentor</p>
           </div>
 
           <div className="grid grid-cols-3 gap-4 mb-8">
@@ -829,7 +965,6 @@ Remember: The goal is self-discovery, not advice-giving.`;
     );
   }
 
-  // PROFILE VIEW
   if (currentView === 'profile') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4">
@@ -846,6 +981,7 @@ Remember: The goal is self-discovery, not advice-giving.`;
             <div className="w-20" />
           </div>
 
+          {/* User Info Card */}
           <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
             <div className="flex items-center gap-4 mb-6">
               <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-full flex items-center justify-center">
@@ -857,6 +993,7 @@ Remember: The goal is self-discovery, not advice-giving.`;
               </div>
             </div>
 
+            {/* Edit Name */}
             <div className="mb-6">
               <label className="text-slate-400 text-sm mb-2 block">Update your name</label>
               <div className="flex gap-3">
@@ -877,6 +1014,7 @@ Remember: The goal is self-discovery, not advice-giving.`;
               </div>
             </div>
 
+            {/* Onboarding Data Preview */}
             <div className="border-t border-slate-700 pt-4">
               <h4 className="text-sm font-semibold text-slate-400 mb-3">Your Foundation</h4>
               <div className="space-y-2 text-sm">
@@ -893,12 +1031,14 @@ Remember: The goal is self-discovery, not advice-giving.`;
             </div>
           </div>
 
+          {/* Danger Zone */}
           <div className="bg-slate-800/50 border border-red-900/50 rounded-xl p-6">
             <h3 className="text-lg font-semibold text-red-400 mb-4 flex items-center gap-2">
               <Trash2 className="w-5 h-5" />
               Danger Zone
             </h3>
 
+            {/* Reset Profile */}
             <div className="mb-4 pb-4 border-b border-slate-700">
               <h4 className="font-medium mb-2">Reset Profile</h4>
               <p className="text-slate-400 text-sm mb-3">
@@ -930,6 +1070,7 @@ Remember: The goal is self-discovery, not advice-giving.`;
               )}
             </div>
 
+            {/* Delete Account */}
             <div>
               <h4 className="font-medium mb-2 text-red-400">Delete Account</h4>
               <p className="text-slate-400 text-sm mb-3">
@@ -966,7 +1107,6 @@ Remember: The goal is self-discovery, not advice-giving.`;
     );
   }
 
-// JOURNAL VIEW
   if (currentView === 'journal') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4">
@@ -987,31 +1127,6 @@ Remember: The goal is self-discovery, not advice-giving.`;
 
           {!showResponse ? (
             <>
-              {showVoiceConfirm && (
-                <div className="mb-6 bg-gradient-to-br from-purple-900/30 to-blue-900/30 border border-purple-700/50 rounded-xl p-6">
-                  <h3 className="text-lg font-semibold text-purple-300 mb-3">
-                    I've distilled your thoughts. Confirm or refine.
-                  </h3>
-                  <div className="bg-slate-900/50 rounded-lg p-4 mb-4 max-h-40 overflow-y-auto">
-                    <p className="text-slate-300 whitespace-pre-wrap">{voiceTranscript}</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={confirmVoiceEntry}
-                      className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold py-3 rounded-lg transition-all"
-                    >
-                      Confirm & Submit
-                    </button>
-                    <button
-                      onClick={refineVoiceEntry}
-                      className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-3 rounded-lg transition-all"
-                    >
-                      Refine
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <div className="mb-6">
                 <label className="text-slate-400 text-sm mb-3 block">What's on your mind?</label>
                 <div className="grid grid-cols-2 gap-3">
@@ -1170,7 +1285,6 @@ Remember: The goal is self-discovery, not advice-giving.`;
     );
   }
 
-  // HISTORY VIEW
   if (currentView === 'history') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4">
