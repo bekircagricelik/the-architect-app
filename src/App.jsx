@@ -225,38 +225,24 @@ export default function ArchitectApp() {
 
   const distillVoiceEntry = async (rawTranscript) => {
     setRecordingStatus('✨ Distilling your thoughts...');
-    
-    const prompt = `You are The Architect's voice processor. A user just spoke their thoughts aloud, and you need to distill them into clear, written form.
-
-Raw voice transcript:
-"${rawTranscript}"
-
-Your task:
-1. Remove all filler words (um, uh, like, you know, etc.)
-2. Fix grammar and sentence structure
-3. Preserve the user's authentic voice and meaning
-4. Make it read naturally as a journal entry
-5. Keep it concise but complete
-6. Do NOT add content that wasn't there - only clarify what was said
-
-Return ONLY the distilled text, nothing else. No preamble, no "Here's the distilled version:", just the clean text.`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/distill", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [
-            { role: "user", content: prompt }
-          ],
+          transcript: rawTranscript
         })
       });
 
       const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Distillation failed');
+      }
+
       const distilledText = data.content[0].text;
       
       setVoiceTranscript(distilledText);
@@ -360,21 +346,22 @@ Respond as The Architect:
 Keep response under 150 words. Write like you're texting a friend you deeply care about.`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/architect", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [
-            { role: "user", content: prompt }
-          ],
+          prompt: prompt
         })
       });
 
       const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get response');
+      }
+
       return data.content[0].text;
     } catch (error) {
       console.error('Architect response failed:', error);
@@ -519,21 +506,22 @@ Your response should:
 Remember: The goal is self-discovery, not advice-giving.`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/architect", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [
-            { role: "user", content: prompt }
-          ],
+          prompt: prompt
         })
       });
 
       const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to get response');
+      }
+
       const newResponse = data.content[0].text;
 
       const updatedHistory = [
