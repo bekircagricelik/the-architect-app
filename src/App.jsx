@@ -129,9 +129,12 @@ export default function ArchitectApp() {
 
         if (finalTranscript) {
           setVoiceTranscript(prev => prev + finalTranscript);
+          setCurrentEntry(prev => prev + finalTranscript);
           setRecordingStatus('✓ Got it! Keep talking or stop.');
         } else if (interimTranscript) {
           setRecordingStatus('🎤 ' + interimTranscript);
+          // Show interim results in textarea too
+          setCurrentEntry(voiceTranscript + interimTranscript);
         }
       };
 
@@ -256,14 +259,43 @@ export default function ArchitectApp() {
     }
   };
 
-  const confirmVoiceEntry = () => {
-    setCurrentEntry(voiceTranscript);
+  const confirmVoiceEntry = async () => {
+    // Distill the voice transcript
     setShowVoiceConfirm(false);
-    setVoiceTranscript('');
+    setIsProcessing(true);
+    setRecordingStatus('✨ Distilling your thoughts...');
+    
+    try {
+      const response = await fetch("/api/distill", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          transcript: voiceTranscript
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Distillation failed');
+      }
+
+      const distilledText = data.content[0].text;
+      setCurrentEntry(distilledText);
+      setVoiceTranscript('');
+      setRecordingStatus('');
+      setIsProcessing(false);
+    } catch (error) {
+      console.error('Distillation failed:', error);
+      setRecordingStatus('');
+      setIsProcessing(false);
+    }
   };
 
   const refineVoiceEntry = () => {
-    setCurrentEntry(voiceTranscript);
+    // User wants to edit manually
     setShowVoiceConfirm(false);
     setVoiceTranscript('');
     setTimeout(() => textareaRef.current?.focus(), 100);
@@ -590,9 +622,12 @@ Remember: The goal is self-discovery, not advice-giving.`;
 
         if (finalTranscript) {
           setOnboardingVoiceTranscript(prev => prev + finalTranscript);
+          setCurrentAnswer(prev => prev + finalTranscript);
           setOnboardingRecordingStatus('✓ Got it! Keep talking or stop.');
         } else if (interimTranscript) {
           setOnboardingRecordingStatus('🎤 ' + interimTranscript);
+          // Show interim in textarea
+          setCurrentAnswer(onboardingVoiceTranscript + interimTranscript);
         }
       };
 
